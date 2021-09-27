@@ -14,7 +14,14 @@ REQUEST_SUMMARY = Summary(
     "http_status_request_seconds", "Times the http(s) request was made", ["domain"]
 )
 REQUEST_STATUS_COUNTER = Counter(
-    "http_status_request_response", "Response codes from http(s) requests", ["domain", "code"]
+    "http_status_request_response",
+    "Response codes from http(s) requests",
+    ["domain", "code"],
+)
+REQUEST_ERROR_COUNTER = Counter(
+    "http_status_request_error",
+    "Exceptions from http(s) requests",
+    ["domain", "exc"],
 )
 
 
@@ -33,11 +40,14 @@ async def perpetual_domain_request(session: aiohttp.ClientSession, domain: str):
     # trace_config = aiohttp.TraceConfig()
     # async with aiohttp.ClientSession(trace_configs=[trace_config]) as session:
     start_time = time.perf_counter()
-    async with session.get(domain) as response:
-        REQUEST_STATUS_COUNTER.labels(domain=domain, code=response.status).inc()
-        await response.text()
-        end_time = time.perf_counter()
-    REQUEST_SUMMARY.labels(domain=domain).observe(end_time - start_time)
+    try:
+        async with session.get(domain) as response:
+            REQUEST_STATUS_COUNTER.labels(domain=domain, code=response.status).inc()
+            await response.text()
+            end_time = time.perf_counter()
+        REQUEST_SUMMARY.labels(domain=domain).observe(end_time - start_time)
+    except Exception as err:
+        REQUEST_ERROR_COUNTER.labels(domain=domain, exc=err.__class__.__name__).inc()
 
     loop = asyncio.get_event_loop()
     await asyncio.sleep(DELAY_BETWEEN_CHECKS)
