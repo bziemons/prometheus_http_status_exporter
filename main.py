@@ -27,7 +27,7 @@ REQUEST_ERROR_COUNTER = Counter(
 
 def stop_loop_on_exc(fut: asyncio.Future):
     loop = asyncio.get_event_loop()
-    if fut.exception() is not None:
+    if not fut.cancelled() and fut.exception() is not None:
         traceback.print_exception(
             type(fut.exception()),
             fut.exception(),
@@ -57,15 +57,18 @@ async def perpetual_domain_request(session: aiohttp.ClientSession, domain: str):
 
 async def async_main(domain_list: List[str]):
     loop = asyncio.get_event_loop()
-    session = aiohttp.ClientSession()
-    for domain in domain_list:
-        task = loop.create_task(
-            perpetual_domain_request(session, domain),
-            name=f"perpetual_domain_request for {domain}",
-        )
-        task.add_done_callback(stop_loop_on_exc)
-        await asyncio.sleep(DELAY_BETWEEN_CHECKS / len(domain_list))
-    print("Started all perpetual domain requests", file=sys.stderr, flush=True)
+    loop.add_signal_handler(signal.SIGTERM, lambda: loop.stop())
+    loop.add_signal_handler(signal.SIGINT, lambda: loop.stop())
+    while not loop.is_closed():
+        async with aiohttp.ClientSession() as session:
+            for domain in domain_list:
+                task = loop.create_task(
+                    perpetual_domain_request(session, domain),
+                    name=f"perpetual_domain_request for {domain}",
+                )
+                task.add_done_callback(stop_loop_on_exc)
+                await asyncio.sleep(DELAY_BETWEEN_CHECKS / len(domain_list))
+            print("Started all perpetual domain requests", file=sys.stderr, flush=True)
 
 
 def main():
@@ -78,12 +81,7 @@ def main():
             if line:
                 domain_list.append(line.strip())
 
-    loop = asyncio.get_event_loop()
-    loop.add_signal_handler(signal.SIGTERM, lambda: loop.stop())
-    loop.add_signal_handler(signal.SIGINT, lambda: loop.stop())
-    task = loop.create_task(async_main(domain_list))
-    task.add_done_callback(stop_loop_on_exc)
-    loop.run_forever()
+    asyncio.run(async_main(domain_list))
 
 
 if __name__ == "__main__":
